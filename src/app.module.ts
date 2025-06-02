@@ -10,7 +10,8 @@ import { ResendModule } from './resend/resend.module';
 @Module({
   imports: [
     ConfigModule.forRoot({
-      isGlobal: true, // Make config available throughout the application
+      envFilePath: '.env',
+      isGlobal: true,
     }),
 
     PrismaModule,
