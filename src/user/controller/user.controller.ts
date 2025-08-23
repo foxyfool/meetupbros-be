@@ -37,6 +37,7 @@ export class UserController {
       email: user.email,
       isEmailVerified: user.isEmailVerified,
       twoFactorEnabled: user.twoFactorEnabled,
+      userAvatar: user.userAvatar,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     };

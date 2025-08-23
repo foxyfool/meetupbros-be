@@ -29,7 +29,7 @@ export class ResendService {
     );
     this.appUrl = this.configService.get<string>(
       'APP_URL',
-      'http://localhost:3001',
+      'http://localhost:3000',
     );
   }
 
@@ -50,7 +50,7 @@ export class ResendService {
         <p style="color: #555; font-size: 14px;">This link will expire in 24 hours.</p>
         <p style="color: #555; font-size: 14px;">If you did not create an account, please ignore this email.</p>
         <div style="text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #e0e0e0; color: #777; font-size: 12px;">
-          &copy; ${new Date().getFullYear()} Your Company Name. All rights reserved.
+          &copy; ${new Date().getFullYear()} MeetupBros. All rights reserved.
         </div>
       </div>
     `,
@@ -74,7 +74,7 @@ export class ResendService {
           <p style="color: #555; font-size: 14px;">This code will expire in 10 minutes.</p>
           <p style="color: #555; font-size: 14px; font-weight: bold;">If you did not request this code, please secure your account immediately.</p>
           <div style="text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #e0e0e0; color: #777; font-size: 12px;">
-            &copy; ${new Date().getFullYear()} Your Company Name. All rights reserved.
+            &copy; ${new Date().getFullYear()} MeetupBros. All rights reserved.
           </div>
         </div>
       `,
@@ -98,7 +98,7 @@ export class ResendService {
             <p style="color: #555; font-size: 14px;">This link will expire in 1 hour.</p>
             <p style="color: #555; font-size: 14px; font-weight: bold;">If you didn't request a password reset, you can safely ignore this email.</p>
             <div style="text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #e0e0e0; color: #777; font-size: 12px;">
-              &copy; ${new Date().getFullYear()} Your Company Name. All rights reserved.
+              &copy; ${new Date().getFullYear()} MeetupBros. All rights reserved.
             </div>
           </div>
         `,

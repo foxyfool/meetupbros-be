@@ -10,7 +10,6 @@ import {
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
-// Signup DTO
 export class CreateUserDto {
   @ApiProperty({
     description: 'Full name of the user',
@@ -106,7 +105,6 @@ export class ResendVerificationDto {
 }
 
 export class RequestPasswordResetDto {
-  v;
   @ApiProperty({
     description: 'Email address of the user',
     example: 'john@example.com',
@@ -135,7 +133,6 @@ export class ResetPasswordDto {
   @MinLength(8, { message: 'New password must be at least 8 characters long' })
   newPassword: string;
 }
-
 export class UserResponseDto {
   @ApiProperty({ example: '123e4567-e89b-12d3-a456-426614174000' })
   id: string;
@@ -151,6 +148,12 @@ export class UserResponseDto {
 
   @ApiProperty({ example: false })
   twoFactorEnabled: boolean;
+
+  @ApiProperty({
+    example: 'https://bucket.s3.amazonaws.com/avatars/user123.jpg',
+    nullable: true,
+  })
+  userAvatar: string | null;
 
   @ApiProperty({ example: '2023-01-01T00:00:00.000Z' })
   createdAt: Date;

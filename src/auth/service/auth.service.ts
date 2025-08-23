@@ -6,7 +6,8 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { PrismaService } from '../../prisma/prisma.service';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository, MoreThan } from 'typeorm';
 import {
   CreateUserDto,
   Enable2FADto,
@@ -18,14 +19,21 @@ import {
 } from '../dto/auth.dto';
 import * as bcrypt from 'bcrypt';
 import { v4 as uuidv4 } from 'uuid';
-import { User } from '@prisma/client';
+import { User } from '../../entities/user.entity';
+import { EmailVerification } from '../../entities/email-verification.entity';
+import { PasswordReset } from '../../entities/password-reset.entity';
 import { ResendService } from '../../resend/resend.service';
 import * as crypto from 'crypto';
 
 @Injectable()
 export class AuthService {
   constructor(
-    private prisma: PrismaService,
+    @InjectRepository(User)
+    private userRepository: Repository<User>,
+    @InjectRepository(EmailVerification)
+    private emailVerificationRepository: Repository<EmailVerification>,
+    @InjectRepository(PasswordReset)
+    private passwordResetRepository: Repository<PasswordReset>,
     private jwtService: JwtService,
     private resendService: ResendService,
   ) {}
@@ -47,7 +55,7 @@ export class AuthService {
   }
 
   async signup(createUserDto: CreateUserDto): Promise<User> {
-    const existingUser = await this.prisma.user.findUnique({
+    const existingUser = await this.userRepository.findOne({
       where: { email: createUserDto.email },
     });
 
@@ -57,52 +65,63 @@ export class AuthService {
 
     const passwordHash = await this.hashPassword(createUserDto.password);
 
-    const user = await this.prisma.user.create({
-      data: {
-        fullName: createUserDto.fullName,
-        email: createUserDto.email,
-        passwordHash,
-      },
+    const user = this.userRepository.create({
+      fullName: createUserDto.fullName,
+      email: createUserDto.email,
+      passwordHash,
     });
+
+    const savedUser = await this.userRepository.save(user);
 
     const verificationToken = uuidv4();
 
-    await this.prisma.emailVerification.create({
-      data: {
-        userId: user.id,
-        token: verificationToken,
-        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 1 day
-      },
+    const emailVerification = this.emailVerificationRepository.create({
+      userId: savedUser.id,
+      token: verificationToken,
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 1 day
     });
 
+    await this.emailVerificationRepository.save(emailVerification);
+
     await this.resendService.sendVerificationEmail(
-      user.email,
+      savedUser.email,
       verificationToken,
     );
 
-    return user;
+    return savedUser;
   }
 
   async verifyEmail(dto: VerifyEmailDto): Promise<User> {
-    const verification = await this.prisma.emailVerification.findFirst({
+    const verification = await this.emailVerificationRepository.findOne({
       where: {
         token: dto.token,
-        expiresAt: { gt: new Date() },
+        expiresAt: MoreThan(new Date()),
       },
-      include: { user: true },
+      relations: ['user'],
     });
 
     if (!verification) {
       throw new BadRequestException('Invalid or expired verification token');
     }
 
-    const user = await this.prisma.user.update({
-      where: { id: verification.userId },
-      data: { isEmailVerified: true },
+    await this.userRepository.update(verification.userId, {
+      isEmailVerified: true,
     });
 
-    await this.prisma.emailVerification.delete({
-      where: { id: verification.id },
+    await this.emailVerificationRepository.delete(verification.id);
+
+    const user = await this.userRepository.findOne({
+      where: { id: verification.userId },
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        isEmailVerified: true,
+        twoFactorEnabled: true,
+        userAvatar: true,
+        createdAt: true,
+        updatedAt: true,
+      },
     });
 
     return user;
@@ -111,8 +130,20 @@ export class AuthService {
   async login(
     loginDto: LoginDto,
   ): Promise<{ token: string; user: User; requires2FA: boolean }> {
-    const user = await this.prisma.user.findUnique({
+    const user = await this.userRepository.findOne({
       where: { email: loginDto.email },
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        passwordHash: true,
+        isEmailVerified: true,
+        twoFactorEnabled: true,
+        twoFactorSecret: true,
+        userAvatar: true,
+        createdAt: true,
+        updatedAt: true,
+      },
     });
 
     if (!user) {
@@ -137,9 +168,8 @@ export class AuthService {
 
       const hashedCode = crypto.createHash('sha256').update(code).digest('hex');
 
-      await this.prisma.user.update({
-        where: { id: user.id },
-        data: { twoFactorSecret: hashedCode },
+      await this.userRepository.update(user.id, {
+        twoFactorSecret: hashedCode,
       });
 
       await this.resendService.send2FACode(user.email, code);
@@ -149,6 +179,7 @@ export class AuthService {
         user: {
           ...user,
           passwordHash: undefined,
+          twoFactorSecret: undefined,
         },
         requires2FA: true,
       };
@@ -164,14 +195,19 @@ export class AuthService {
       user: {
         ...user,
         passwordHash: undefined, // Remove password hash from response
+        twoFactorSecret: undefined, // Remove 2FA secret from response
       },
       requires2FA: false,
     };
   }
 
   async enable2FA(userId: string, dto: Enable2FADto): Promise<void> {
-    const user = await this.prisma.user.findUnique({
+    const user = await this.userRepository.findOne({
       where: { id: userId },
+      select: {
+        id: true,
+        isEmailVerified: true,
+      },
     });
 
     if (!user) {
@@ -184,17 +220,25 @@ export class AuthService {
       );
     }
 
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: { twoFactorEnabled: dto.enable },
+    await this.userRepository.update(userId, {
+      twoFactorEnabled: dto.enable,
     });
   }
 
-  async verify2FA(
-    dto: Verify2FADto,
-  ): Promise<{ token: string; user: User }> {
-    const user = await this.prisma.user.findUnique({
+  async verify2FA(dto: Verify2FADto): Promise<{ token: string; user: User }> {
+    const user = await this.userRepository.findOne({
       where: { email: dto.email },
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        isEmailVerified: true,
+        twoFactorEnabled: true,
+        twoFactorSecret: true,
+        userAvatar: true,
+        createdAt: true,
+        updatedAt: true,
+      },
     });
 
     if (!user) {
@@ -214,9 +258,8 @@ export class AuthService {
       throw new UnauthorizedException('Invalid 2FA code');
     }
 
-    await this.prisma.user.update({
-      where: { id: user.id },
-      data: { twoFactorSecret: null },
+    await this.userRepository.update(user.id, {
+      twoFactorSecret: null,
     });
 
     const payload = {
@@ -228,13 +271,13 @@ export class AuthService {
       token: this.jwtService.sign(payload),
       user: {
         ...user,
-        passwordHash: undefined,
+        twoFactorSecret: undefined, // Remove 2FA secret from response
       },
     };
   }
 
   async requestPasswordReset(dto: RequestPasswordResetDto): Promise<void> {
-    const user = await this.prisma.user.findUnique({
+    const user = await this.userRepository.findOne({
       where: { email: dto.email },
     });
 
@@ -244,18 +287,23 @@ export class AuthService {
 
     const resetToken = uuidv4();
 
-    await this.prisma.passwordReset.upsert({
+    const existingReset = await this.passwordResetRepository.findOne({
       where: { userId: user.id },
-      update: {
+    });
+
+    if (existingReset) {
+      await this.passwordResetRepository.update(existingReset.id, {
         token: resetToken,
         expiresAt: new Date(Date.now() + 60 * 60 * 1000), // 1 hour
-      },
-      create: {
+      });
+    } else {
+      const passwordReset = this.passwordResetRepository.create({
         userId: user.id,
         token: resetToken,
         expiresAt: new Date(Date.now() + 60 * 60 * 1000), // 1 hour
-      },
-    });
+      });
+      await this.passwordResetRepository.save(passwordReset);
+    }
 
     await this.resendService.sendPasswordResetEmail(user.email, resetToken);
 
@@ -263,10 +311,10 @@ export class AuthService {
   }
 
   async resetPassword(dto: ResetPasswordDto): Promise<void> {
-    const passwordReset = await this.prisma.passwordReset.findFirst({
+    const passwordReset = await this.passwordResetRepository.findOne({
       where: {
         token: dto.token,
-        expiresAt: { gt: new Date() },
+        expiresAt: MoreThan(new Date()),
       },
     });
 
@@ -276,18 +324,15 @@ export class AuthService {
 
     const passwordHash = await this.hashPassword(dto.newPassword);
 
-    await this.prisma.user.update({
-      where: { id: passwordReset.userId },
-      data: { passwordHash },
+    await this.userRepository.update(passwordReset.userId, {
+      passwordHash,
     });
 
-    await this.prisma.passwordReset.delete({
-      where: { id: passwordReset.id },
-    });
+    await this.passwordResetRepository.delete(passwordReset.id);
   }
 
   async resendVerificationEmail(email: string): Promise<void> {
-    const user = await this.prisma.user.findUnique({
+    const user = await this.userRepository.findOne({
       where: { email },
     });
 
@@ -299,19 +344,19 @@ export class AuthService {
       throw new BadRequestException('Email is already verified');
     }
 
-    await this.prisma.emailVerification.deleteMany({
-      where: { userId: user.id },
+    await this.emailVerificationRepository.delete({
+      userId: user.id,
     });
 
     const verificationToken = uuidv4();
 
-    await this.prisma.emailVerification.create({
-      data: {
-        userId: user.id,
-        token: verificationToken,
-        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
-      },
+    const emailVerification = this.emailVerificationRepository.create({
+      userId: user.id,
+      token: verificationToken,
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
     });
+
+    await this.emailVerificationRepository.save(emailVerification);
 
     await this.resendService.sendVerificationEmail(
       user.email,

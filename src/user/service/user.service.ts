@@ -1,31 +1,50 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { PrismaService } from '../../prisma/prisma.service';
-import { User } from '@prisma/client';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { User } from '../../entities/user.entity';
 
 @Injectable()
 export class UserService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    @InjectRepository(User)
+    private userRepository: Repository<User>,
+  ) {}
 
   async findById(id: string): Promise<User> {
-    const user = await this.prisma.user.findUnique({
+    const user = await this.userRepository.findOne({
       where: { id },
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        isEmailVerified: true,
+        twoFactorEnabled: true,
+        userAvatar: true,
+        createdAt: true,
+        updatedAt: true,
+        // Explicitly exclude sensitive fields
+        passwordHash: false,
+        twoFactorSecret: false,
+      },
     });
 
     if (!user) {
       throw new NotFoundException(`User with ID ${id} not found`);
     }
 
-    const { passwordHash, twoFactorSecret, ...userWithoutSensitiveData } = user;
-    return {
-      ...userWithoutSensitiveData,
-      passwordHash: undefined,
-      twoFactorSecret: undefined,
-    } as User;
+    return user;
   }
 
   async findByEmail(email: string): Promise<User | null> {
-    return this.prisma.user.findUnique({
+    return this.userRepository.findOne({
       where: { email },
+    });
+  }
+
+  // Alternative method
+  async findByIdWithSensitiveData(id: string): Promise<User | null> {
+    return this.userRepository.findOne({
+      where: { id },
     });
   }
 }

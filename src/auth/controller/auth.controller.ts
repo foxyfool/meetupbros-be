@@ -212,6 +212,7 @@ export class AuthController {
       email: user.email,
       isEmailVerified: user.isEmailVerified,
       twoFactorEnabled: user.twoFactorEnabled,
+      userAvatar: user.userAvatar || null,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     };
